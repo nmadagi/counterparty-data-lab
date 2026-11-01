@@ -35,6 +35,71 @@ Tests: `python -m pytest tests/`. Export the tables as CSV:
 
 ## How it hangs together
 
+How the modules fit together (each box is one file):
+
+```mermaid
+flowchart TD
+
+subgraph group_book["Synthetic Book"]
+  node_book_config["Book configuration<br/>[book.py]"]
+  node_generator["Book generator<br/>[generate.py]"]
+end
+
+subgraph group_foundation["Data Foundation"]
+  node_loader["Validated loader<br/>[load.py]"]
+  node_validator["Load checks<br/>[validate.py]"]
+  node_duckdb[("Book database")]
+end
+
+subgraph group_engines["Risk Engines"]
+  node_exposure["Exposure monitor<br/>[exposure.py]"]
+  node_haircut["Haircut backtest<br/>[haircut.py]"]
+  node_firedrill["Default fire drill<br/>[firedrill.py]"]
+end
+
+subgraph group_outputs["Application and Outputs"]
+  node_app["Streamlit dashboard<br/>[app.py]"]
+  node_narrative["Summary narrative<br/>[narrative.py]"]
+  node_report["CSV/PDF reports<br/>[report.py]"]
+  node_export["CSV table export<br/>[export.py]"]
+end
+
+node_user(("Risk user"))
+node_llm{{"Anthropic API"}}
+
+node_user -->|"uses"| node_app
+node_loader -->|"generates inputs"| node_generator
+node_loader -->|"runs checks"| node_validator
+node_generator -->|"uses configuration"| node_book_config
+node_loader -->|"loads tables"| node_duckdb
+node_validator -->|"checks tables"| node_duckdb
+node_exposure -->|"reads SQL"| node_duckdb
+node_haircut -->|"reads SQL"| node_duckdb
+node_firedrill -->|"reads SQL"| node_duckdb
+node_firedrill -->|"marks positions"| node_exposure
+node_haircut -->|"marks positions"| node_exposure
+node_app -->|"builds book"| node_loader
+node_app -->|"shows monitoring"| node_exposure
+node_app -->|"shows backtest"| node_haircut
+node_app -->|"runs drill"| node_firedrill
+node_app -->|"builds summary"| node_narrative
+node_narrative -.->|"phrases figures"| node_llm
+node_app -.->|"formats reports"| node_report
+node_export -->|"builds book"| node_loader
+node_export -->|"exports results"| node_exposure
+node_export -->|"exports results"| node_haircut
+node_export -->|"exports results"| node_firedrill
+
+classDef toneBlue fill:#dbeafe,stroke:#2563eb,stroke-width:1.5px,color:#172554
+classDef toneAmber fill:#fef3c7,stroke:#d97706,stroke-width:1.5px,color:#78350f
+classDef toneMint fill:#dcfce7,stroke:#16a34a,stroke-width:1.5px,color:#14532d
+classDef toneRose fill:#ffe4e6,stroke:#e11d48,stroke-width:1.5px,color:#881337
+class node_book_config,node_generator,node_user toneBlue
+class node_loader,node_validator,node_duckdb toneAmber
+class node_exposure,node_haircut,node_firedrill,node_llm toneMint
+class node_app,node_narrative,node_report,node_export toneRose
+```
+
 Prices, borrowers and position-level loans are generated with a fixed
 seed and loaded into DuckDB. The load is gated: record counts, on-loan
 control totals per borrower, collateral tied to loan times requirement
