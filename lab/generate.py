@@ -19,7 +19,7 @@ Fixed seed, so every run is the same book.
 import numpy as np
 import pandas as pd
 
-from lab.book import ASSET_CLASSES, BORROWERS, FLAT_HAIRCUT
+from lab.book import ASSET_CLASSES, BORROWERS, MARGIN_REQUIREMENT
 
 SEED = 19
 N_DAYS = 756                      # three trading years
@@ -115,7 +115,7 @@ def generate_borrowers():
 
 def generate_positions(seed=SEED):
     """One row per loan. loan_prev and coll_prev are USD millions at the
-    previous close; the collateral is the flat requirement times one plus
+    previous close; the collateral is the house requirement times one plus
     the borrower's buffer, because that is what the borrower had posted
     before today's move."""
     rng = np.random.default_rng(seed + 1)
@@ -127,7 +127,7 @@ def generate_positions(seed=SEED):
             k = max(1, round(n_pos * w))
             raw = rng.lognormal(mean=0.0, sigma=0.8, size=k)
             sizes = raw / raw.sum() * b["on_loan"] * w
-            req = FLAT_HAIRCUT[coll_cls]
+            req = MARGIN_REQUIREMENT[coll_cls]
             for s in sizes:
                 pid += 1
                 rows.append({

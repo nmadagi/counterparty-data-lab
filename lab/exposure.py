@@ -1,5 +1,6 @@
-"""Client exposure monitor: mark every position at the as-of close and
-roll it up per borrower against the margin requirement and the limits.
+"""Counterparty exposure monitor: mark every position at the as-of close
+and roll it up per borrower against the margin requirement and the
+limits.
 
 The borrower posted collateral at the previous close equal to the
 requirement plus its habitual buffer. Today's prices move the lent
@@ -43,13 +44,13 @@ def mark_positions(con):
     df["excess"] = df["coll_asof"] - df["required"]
     df["nonstandard"] = df["coll_class"].map(
         lambda c: ASSET_CLASSES[c]["nonstandard"])
-    df["fee_income"] = df["loan_asof"] * df["loan_class"].map(
-        lambda c: ASSET_CLASSES[c]["fee_bps"]) / 1e4
     return df
 
 
 def borrower_summary(con):
-    """One row per borrower, the morning exposure report."""
+    """One row per borrower, the morning exposure report. A position whose
+    borrower is not in reference data has nowhere to roll up to and drops
+    out here, silently. That is why the loader checks for it first."""
     marks = mark_positions(con)
     bor = con.execute(
         'SELECT borrower_id, name, type, grade, "limit", nonstd_cap, buffer '
@@ -62,7 +63,6 @@ def borrower_summary(con):
         "required": g["required"].sum(),
         "nonstd_collateral": marks[marks.nonstandard].groupby(
             "borrower_id")["coll_asof"].sum(),
-        "fee_income": g["fee_income"].sum(),
     }).fillna({"nonstd_collateral": 0.0})
     out = bor.merge(out, left_on="borrower_id", right_index=True)
 
@@ -102,5 +102,4 @@ def book_totals(summary):
         "n_limit_breaches": int((summary["utilization"] > 1.0).sum()),
         "n_nonstd_breaches": int(
             (summary["nonstd_share"] > summary["nonstd_cap"]).sum()),
-        "fee_income": float(summary["fee_income"].sum()),
     }

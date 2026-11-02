@@ -13,13 +13,11 @@ high yield as collateral are tagged non-standard.
 
 The mix is fixed-income heavy on purpose. Agency lending programs lend
 far more government bonds by value than equities, and a large share of
-that is against non-cash collateral. That mix is also what makes the
-thesis work: the flat schedule over-collateralises Treasury loans, so
-scaling the haircut to volatility frees collateral there.
+that is against non-cash collateral.
 
 Each borrower has a habitual buffer of 0 to 3% above the requirement.
 Some borrowers post exactly what is asked and get called every time the
-market moves; some keep a cushion. Dogwood and Rowan keep none, which is
+market moves, and some keep a cushion. Dogwood and Rowan keep none, which is
 why they are called on the as-of day.
 
 Position count per borrower is on loan divided by 60, clipped to 8 and
@@ -32,9 +30,7 @@ Three years of business days ending 31 December 2025. Three common
 factors (equity, rates, credit) with Student t shocks (5 degrees of
 freedom, scaled to unit variance) so tails are fat, clipped at five
 standard deviations so no single draw prints a one-day move larger than
-any real market has. The largest one-day equity move in the history is
-about 7% for large caps and 9% for small caps. Each class index
-loads on the factors:
+any real market has. Each class index loads on the factors:
 
 | class | equity | rates | credit | own noise |
 |---|---|---|---|---|
@@ -54,10 +50,8 @@ true of two different baskets of stocks.
 
 A stress episode is planted from day 330 to day 372 (six weeks in the
 second year): factor volatility doubles, equities drift down 0.6% a day,
-credit 0.2% a day, Treasuries drift up 0.1% a day. On the seed used,
-large cap equities fall about 25 to 30% over the episode, high yield
-about 14 to 17%, Treasuries gain about 3%. The seed was chosen from a scan so
-the episode reads like 2020, not 1929.
+credit 0.2% a day, Treasuries drift up 0.1% a day. The seed was chosen
+from a scan so the episode reads like 2020, not 1929.
 
 The as-of day (the last day) carries an added rally shock: equity factor
 up 2.5%, rates up 0.3%, credit up 0.4%. A lender is exposed when the
@@ -66,55 +60,62 @@ out. Without it the monitor would show a quiet day.
 
 Cash is 100 every day. Interest on cash collateral is ignored.
 
-## Flat house schedule
+## House margin schedule
 
 102% for cash and Treasuries, 105% for everything else. This is the
 convention in US agency lending: 102% for same-currency cash, 105% for
-non-cash or cross-currency. The point of the backtest is that it is a
-convention, not a risk number.
+non-cash or cross-currency. Required collateral is on loan times the
+schedule for that collateral class.
 
-## Volatility scaled haircut
+## Load checks
 
-Haircut = 1 + z(99%) x trailing 250-day standard deviation of the daily
-log change in (lent basket price / collateral basket price) x sqrt(2),
-floored at 101%. Normal quantile, 2.3263. Two-day horizon: the default
-day plus one day to buy the securities back under T+1 settlement. A
-trailing simple standard deviation rather than an EWMA because a
-requirement that jumps every day is not something a client will accept;
-the cost is that it lags the onset of a stress, which the backtest shows
-honestly as two amber pairs.
+Twenty checks in four families, run at every load. Any failure blocks
+the load and names itself.
 
-The floor at 101% is a judgement: no loan is lent with less than one
-point of cushion whatever the volatility says.
+Record counts: prices, positions and borrowers in the database equal
+what the source wrote, and there are at least 700 distinct price dates.
 
-## Backtest
+Control totals: total on loan ties to the source and to the static
+config within a millionth. On loan and collateral per borrower tie to
+the source figures. Collateral equals on loan times the requirement
+times one plus the borrower's buffer.
 
-Every day after the first 250 is a window start. The forward move is
-the ratio change over the next two days. An exceedance is a forward
-move larger than that day's haircut. Windows overlap, so one bad day is
-seen by two windows; the expected count uses the same convention.
+Completeness: no null fields on a position, no non-positive loan or
+collateral, no null or non-positive price, every series on every date,
+no one-day move beyond 40% in any class (a data error, not a market),
+and no traded series printing the same close three days running (a feed
+that stopped, not a quiet market, and cash is exempt).
 
-Zones use the Basel traffic light on the binomial count: green while
-the cumulative probability of the observed count is below 95%, amber
-below 99.99%, red above. On 250 days at 99% that gives the familiar
-0 to 4 green, 5 to 9 amber, 10 and up red (BCBS, Supervisory framework
-for the use of backtesting, 1996).
+Reference data: no position id loaded twice, every position keys to a
+borrower in the borrowers table, every loan and collateral class is a
+known class, every borrower has positions and a positive limit.
 
-## Fire drill
+## Planted breaks
 
-Orderly path: today's prices less a liquidation cost per class
-(Treasuries 0.05%, IG 0.4%, large cap 0.2%, small cap 1.0%, high
-yield 1.0%) on both the sale of collateral and the buyback of lent
-securities.
+Three, each loaded alone into a staging copy and run through the same
+checks with the clean source totals as the expected values. The
+exposure report is recomputed on the broken copy and compared with the
+clean one, and the borrower that moved most is the one reported.
 
-Stressed path: the worst two consecutive days in the three-year history
-for that borrower's mix, with every class moved together over the same
-two days, the window chosen to maximise buyback minus proceeds. One
-joint historical window, not each class at its own worst day.
+1. Duplicate: Alder's largest position appears twice. Alder sits at 90%
+   of its limit, so the duplicate is the one most likely to tip a
+   borrower over. It does not on this book ($301M overstated, limit used
+   93%), so the severity is medium: risk overstated, business blocked.
+2. Orphan: Dogwood's largest position is keyed to borrower B99, which
+   reference data does not know. The exposure roll-up joins positions to
+   borrowers, so the loan drops out silently and Dogwood, which is over
+   its limit on the clean load, no longer is. High severity.
+3. Frozen feed: the last three closes of the large cap lent basket are
+   the close before them. The as-of day is a rally, so every borrower
+   lending large caps is marked flat instead of up. Birch's $49M margin
+   call, the largest on the book, is not raised. High severity.
 
-Netting: one master agreement per borrower, so the loss is total
-buyback minus total proceeds, floored at zero. Pair-level shortfalls
-show where the cushion broke.
+Severity rule: high if the break understates on loan or a margin call
+on the most affected borrower, or hides a limit breach. Medium if it
+overstates on loan. Low otherwise.
+
+Remediation due date is ten business days from raised. That is a
+placeholder for whatever the house SLA is.
 
 ## Limits
 
@@ -123,19 +124,15 @@ cap by grade: 35% for A names and the BBB names that post equity
 collateral, 25% for the HY-heavy BBB fund, 20% for BB. Near means
 within 10% of the limit or cap.
 
-## Fees
-
-Annual lending fee by lent class: Treasuries 5bp, IG 15bp, large cap
-35bp, small cap 150bp. Shown per borrower per year so fee can sit next
-to stress shortfall as risk and reward.
-
 ## Simplifications I would name first
 
 1. Daily marks, not intraday. The monitor runs at the close.
 2. One price series per asset class and side, not per security. A
    basket, not a stock.
-3. No cash collateral reinvestment. In a real program the cash is
-   reinvested and that carries its own risk; here cash is cash.
+3. The breaks are planted, so the root cause is known. On a real feed
+   the root cause is what the analyst writes after tracing the break
+   upstream, and the concern is open until then.
 
-Also: no CCAR capital calculation, no FX, no term loans, no
-rehypothecation, no wrong-way risk between borrower and collateral.
+Also: no cash collateral reinvestment, no FX, no term loans, no
+rehypothecation, no wrong-way risk between borrower and collateral, no
+intraday feed timing.

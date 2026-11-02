@@ -25,7 +25,7 @@ Running notes to myself, roughly in order.
   securities rally, so the last day is now a rally by design.
 - Horizon two days, not three or five. Default day plus one day to buy
   in under T+1. Five days is what the capital rules use for repo-style
-  netting sets; two is what a liquid equity close-out actually takes.
+  netting sets. Two is what a liquid equity close-out actually takes.
   With five the flat schedule looks even worse, so two is the
   conservative choice for the thesis, not the lenient one.
 - Traffic light zones: I first computed the cumulative probability of
@@ -56,13 +56,46 @@ Running notes to myself, roughly in order.
 - The LLM reply was cut off at 700 tokens once the facts block grew.
   Raised to 1000. The number check still passes on the first try.
 
+## second cut: the data layer is the product
+
+- Took the haircut backtest and the fire drill out. They were the
+  thesis of the first cut, but the part of this repo I kept coming back
+  to was the gated load: the one time I broke the generator, the
+  control total check named the borrower before I had opened the app.
+  That is the useful thing here, so the repo is now about it.
+- Renamed to counterparty-data-lab. The exposure monitor stays, because
+  a data control with no consumer is a unit test.
+- Added the concern log. The question I wanted answered: when a feed
+  breaks, what does the consumer actually see? So each break is loaded
+  alone into a staging copy, the checks run, and the exposure report is
+  recomputed on the broken copy. The difference is the impact, in
+  dollars, on the borrower that moved most.
+- The orphan break surprised me. I expected the roll-up to fail loudly
+  on a borrower id it did not know. It did not: the join to reference
+  data is an inner join, so the loan just vanished and Dogwood went from
+  over its limit to under it. Nothing on the report looked wrong. That
+  is the reference data check's whole justification, and it is written
+  on the tab.
+- Frozen feed: the check is three equal closes in a row on a traded
+  series. Two in a row happens on real data (a holiday carried forward).
+  Three does not. Cash is exempt because cash is 100 every day.
+- Severity rule written down rather than judged: understated risk is
+  high, overstated is medium. Understated is the expensive failure. It
+  is also the one nobody complains about, because no call goes out.
+- Due date is ten business days from raised, which is a placeholder for
+  whatever the house SLA is. Status is open on every row because the
+  breaks are planted and nothing has been fixed. A log where everything
+  is closed is a log nobody reads.
+- The narrative still only phrases. The facts block now carries the
+  concern figures, so the number check covers them too.
+
 ## todo
 
 - TODO: intraday marks, or at least a mid-day mark, for the exposure
   monitor
-- TODO: cash collateral reinvestment book with its own liquidity and
-  credit risk
-- TODO: a stressed-volatility overlay on the scaled haircut so the
-  amber pairs go green at the stress onset without an EWMA
+- TODO: a second staging load that applies the permanent fix and
+  re-runs the checks, so a concern can move to closed with evidence
+- TODO: trend view: the exposure report over the last twenty closes,
+  with a flag on any borrower moving more than 25% in a day
 - TODO: wrong-way risk: a borrower whose own credit is correlated with
   the collateral it posts

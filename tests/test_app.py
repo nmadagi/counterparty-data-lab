@@ -22,24 +22,27 @@ def _captions(at):
     return " ".join(c.value for c in at.caption)
 
 
+def _text(at):
+    return " ".join(m.value for m in at.markdown)
+
+
 def test_every_tab_renders(app):
     labels = [m.label for m in app.metric]
-    for want in ("On loan", "Flat schedule exceedances",
-                 "Net shortfall (indemnity pays)"):
+    for want in ("Controls passed", "Open concerns", "On loan"):
         assert want in labels
-    # notes are captions now, no metric carries a delta arrow
+    # notes are captions, no metric carries a delta arrow
     assert all(not m.delta for m in app.metric)
     text = _captions(app)
-    assert "17/17 validation checks" in text
-    assert "Stressed window opens 18 Jun 2024" in text
-    assert "Buying back costs" in text
+    assert "20/20 data controls passed" in text
+    assert "data concerns" in _text(app)
 
 
-def test_fire_drill_widgets(app):
-    app.radio[0].set_value("orderly").run()
+def test_concern_picker(app):
+    app.selectbox[0].set_value("DC-003").run()
     assert not app.exception
-    assert "Orderly close out" in _captions(app)
-    app.radio[0].set_value("stressed").run()
-    app.selectbox[0].set_value("B02").run()
+    body = _text(app)
+    assert "price_feed_not_frozen" in body
+    assert "Birch" in body
+    app.selectbox[0].set_value("DC-002").run()
     assert not app.exception
-    assert "what Birch borrowed moved" in _captions(app)
+    assert "limit breach hidden" in _text(app)

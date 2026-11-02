@@ -1,28 +1,29 @@
+import pandas as pd
 import pytest
 
-from lab import exposure, firedrill, haircut, narrative, report
+from lab import concerns, exposure, narrative, report
 from lab.load import build_db, as_of_dates
 
 
 @pytest.fixture(scope="module")
 def parts():
-    con, _ = build_db()
+    con, checks = build_db()
     summary = exposure.borrower_summary(con)
     totals = exposure.book_totals(summary)
-    bt = haircut.summary(haircut.backtest(con))
-    drill = firedrill.run(con, "B04", "stressed")
+    log = concerns.run(con)
     as_of, _ = as_of_dates(con)
-    payload = narrative.build_payload(summary, totals, bt, drill, as_of)
+    payload = narrative.build_payload(summary, totals, log, checks,
+                                      pd.Timestamp(as_of))
     con.close()
-    return payload, summary, drill
+    return payload, summary, log
 
 
 def test_payload_has_the_headline_numbers(parts):
     p, _, _ = parts
     assert p["n_margin_calls"] >= 1
-    assert p["flat_exceed"] > p["scaled_exceed"]
-    assert p["collateral_saved"] > 0
-    assert p["drill_shortfall"] > 0
+    assert p["checks_passed"] == p["checks_total"] == 20
+    assert p["n_concerns"] == 3
+    assert p["n_high"] == 2
     assert "Dogwood" in p["over_limit"]
 
 
@@ -31,6 +32,7 @@ def test_template_passes_its_own_number_check(parts):
     text = narrative.template_narrative(p)
     assert narrative.check_numbers(text, p) == []
     assert p["largest_call_name"] in text
+    assert "data concerns" in text
 
 
 def test_check_numbers_catches_invented_figures(parts):
@@ -55,8 +57,8 @@ def test_generate_falls_back_without_key(parts, monkeypatch):
 
 
 def test_humanize_strips_dashes():
-    assert "\u2014" not in narrative.humanize("a \u2014 b \u2013 c")
-    assert narrative.humanize("x \u2019y\u2019") == "x 'y'"
+    assert "—" not in narrative.humanize("a — b – c")
+    assert narrative.humanize("x ’y’") == "x 'y'"
 
 
 def test_money_formats():
@@ -66,10 +68,11 @@ def test_money_formats():
 
 
 def test_exports_produce_bytes(parts):
-    p, summary, drill = parts
+    _, summary, log = parts
     csv = report.exposure_csv(summary)
     assert csv.startswith(b"borrower_id,name")
     assert csv.count(b"\n") == len(summary) + 1
-    pdf = report.summary_pdf(p, narrative.template_narrative(p), summary, drill)
-    assert pdf[:4] == b"%PDF"
-    assert len(pdf) > 1500
+    dc = report.concerns_csv(log)
+    assert dc.startswith(b"concern_id,raised,due")
+    assert dc.count(b"\n") == len(log) + 1
+    assert b"DC-003" in dc

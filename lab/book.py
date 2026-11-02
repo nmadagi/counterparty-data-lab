@@ -15,28 +15,22 @@ its own basket noise on top.
 ASSET_CLASSES = {
     "cash": {
         "label": "Cash (USD)", "loanable": False, "collateral": True,
-        "nonstandard": False, "basket_vol": 0.0, "fee_bps": 0,
-        "liq_cost": 0.0},
+        "nonstandard": False, "basket_vol": 0.0},
     "ust": {
         "label": "US Treasuries", "loanable": True, "collateral": True,
-        "nonstandard": False, "basket_vol": 0.0005, "fee_bps": 5,
-        "liq_cost": 0.0005},
+        "nonstandard": False, "basket_vol": 0.0005},
     "ig_corp": {
         "label": "IG corporate bonds", "loanable": True, "collateral": True,
-        "nonstandard": False, "basket_vol": 0.0015, "fee_bps": 15,
-        "liq_cost": 0.004},
+        "nonstandard": False, "basket_vol": 0.0015},
     "us_large_eq": {
         "label": "US large cap equities", "loanable": True,
-        "collateral": True, "nonstandard": True, "basket_vol": 0.005,
-        "fee_bps": 35, "liq_cost": 0.002},
+        "collateral": True, "nonstandard": True, "basket_vol": 0.005},
     "us_small_eq": {
         "label": "US small cap equities", "loanable": True,
-        "collateral": False, "nonstandard": True, "basket_vol": 0.007,
-        "fee_bps": 150, "liq_cost": 0.01},
+        "collateral": False, "nonstandard": True, "basket_vol": 0.007},
     "hy_corp": {
         "label": "High yield bonds", "loanable": False, "collateral": True,
-        "nonstandard": True, "basket_vol": 0.003, "fee_bps": 0,
-        "liq_cost": 0.01},
+        "nonstandard": True, "basket_vol": 0.003},
 }
 
 LOAN_CLASSES = [k for k, v in ASSET_CLASSES.items() if v["loanable"]]
@@ -47,32 +41,12 @@ def label(cls):
     return ASSET_CLASSES[cls]["label"]
 
 
-# short names for chart axes, where the full label does not fit
-SHORT_LABEL = {
-    "cash": "Cash", "ust": "Treasuries", "ig_corp": "IG bonds",
-    "hy_corp": "High yield", "us_large_eq": "Large cap",
-    "us_small_eq": "Small cap",
-}
-
-
-def short_label(cls):
-    return SHORT_LABEL[cls]
-
-
-# the flat house schedule: one number per collateral type, whatever is
-# lent against it and whatever the market is doing. 102 for cash and
-# treasuries, 105 for everything else, which is the industry convention
-# for US agency lending programs
-FLAT_HAIRCUT = {
+# the house margin schedule: one number per collateral type. 102 for cash
+# and treasuries, 105 for everything else, the US agency lending convention
+MARGIN_REQUIREMENT = {
     "cash": 1.02, "ust": 1.02, "ig_corp": 1.05, "us_large_eq": 1.05,
     "hy_corp": 1.05,
 }
-
-# volatility scaled methodology
-CONFIDENCE = 0.99
-HORIZON_DAYS = 2        # default day plus one day to buy the securities back
-LOOKBACK_DAYS = 250     # one trading year of history behind each haircut
-HAIRCUT_FLOOR = 1.01    # never lend with less than one point of cushion
 
 
 # borrowers. on_loan is USD millions at the previous close. limit is the
@@ -149,14 +123,3 @@ BORROWERS = {
 
 def total_on_loan():
     return sum(b["on_loan"] for b in BORROWERS.values())
-
-
-def pairs_in_book():
-    """Every (loan class, collateral class) pair that appears in any
-    borrower's mix, in a stable order."""
-    seen = []
-    for b in BORROWERS.values():
-        for pair in b["mix"]:
-            if pair not in seen:
-                seen.append(pair)
-    return seen

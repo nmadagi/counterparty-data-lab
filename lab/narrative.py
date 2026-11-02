@@ -1,24 +1,25 @@
-"""Senior management exposure summary.
+"""Senior management summary.
 
 The engine computes, the model only phrases. The LLM gets a short block
-of finished figures and writes three paragraphs around them. Every
-number in its reply is checked against the figures it was given; if it
-invented one the reply is discarded for the deterministic template. No
-API key means the template runs alone and nothing needs a network.
+of finished figures and writes two paragraphs around them. Every number
+in its reply is checked against the figures it was given. If it invented
+one the reply is discarded for the deterministic template. No API key
+means the template runs alone and nothing needs a network.
 """
 
 import os
 import re
 
-PROMPT = """You are drafting a short exposure summary for senior management
-of a securities lending business on a volatile day. Use ONLY the numbers
-given below. Do not compute, estimate or invent any figure. Plain business
-English, explain any term of art in a few words, three short paragraphs
-maximum, no bullet points, no headers.
+PROMPT = """You are drafting a short morning summary for senior management
+of a securities lending business: the counterparty exposure picture and
+the open data concerns behind it. Use ONLY the numbers given below. Do not
+compute, estimate or invent any figure. Plain business English, explain
+any term of art in a few words, two short paragraphs maximum, no bullet
+points, no headers.
 
 Style: write money exactly as given below, for example "$42.5 billion" or
 "$133 million", never as raw millions like 42,481. Short sentences. Do not
-use dashes of any kind; use commas or full stops instead.
+use dashes of any kind, use commas or full stops instead.
 
 Figures:
 {facts}
@@ -41,8 +42,8 @@ def pct(x):
 
 # dashes and curly quotes read as machine-written; swap them for plain
 # punctuation before anything reaches the screen
-_DASHES = str.maketrans({"\u2014": ",", "\u2013": ",", "\u2018": "'",
-                         "\u2019": "'", "\u201c": '"', "\u201d": '"'})
+_DASHES = str.maketrans({"—": ",", "–": ",", "‘": "'",
+                         "’": "'", "“": '"', "”": '"'})
 
 
 def humanize(text):
@@ -53,11 +54,12 @@ def humanize(text):
     return text.strip()
 
 
-def build_payload(summary, totals, bt_summary, drill, as_of):
+def build_payload(summary, totals, log, checks, as_of):
     called = summary[summary.margin_call > 0].sort_values(
         "margin_call", ascending=False)
     over = summary[summary.utilization > 1.0]["name"].tolist()
     nonstd = summary[summary.nonstd_share > summary.nonstd_cap]["name"].tolist()
+    high = log[log.severity == "high"]
     return {
         "as_of": as_of.strftime("%B %d, %Y"),
         "on_loan": round(totals["on_loan"]),
@@ -69,18 +71,12 @@ def build_payload(summary, totals, bt_summary, drill, as_of):
         "largest_call": round(called["margin_call"].iloc[0]) if len(called) else 0,
         "over_limit": over,
         "nonstd_breaches": nonstd,
-        "flat_exceed": bt_summary["flat_exceed"],
-        "scaled_exceed": bt_summary["scaled_exceed"],
-        "expected_exceed": round(bt_summary["expected_per_pair"]
-                                 * bt_summary["n_pairs"]),
-        "collateral_saved": round(bt_summary["flat_required"]
-                                  - bt_summary["scaled_required"]),
-        "drill_name": drill.name,
-        "drill_loan": round(drill.loan_at_default),
-        "drill_shortfall": round(drill.net_shortfall),
-        "drill_window": drill.window_start.strftime("%B %d, %Y")
-        if drill.window_start is not None else None,
-        "drill_nonstd_pct": round(100 * drill.nonstd_share, 1),
+        "checks_passed": sum(1 for c in checks if c.passed),
+        "checks_total": len(checks),
+        "n_concerns": int(len(log)),
+        "n_high": int(len(high)),
+        "high_impacts": high["impact"].tolist(),
+        "sla_days": 10,
     }
 
 
@@ -113,27 +109,16 @@ def template_narrative(p):
              f"against {money(p['collateral'])} of collateral, a coverage of "
              f"{p['coverage_pct']}%. {calls}{limits}")
 
-    para2 = (f"On the haircut methodology, the flat house schedule was "
-             f"beaten {p['flat_exceed']} times in the backtest where about "
-             f"{p['expected_exceed']} would be expected at 99% confidence. The "
-             f"volatility scaled haircut was beaten {p['scaled_exceed']} times "
-             f"and needs {money(p['collateral_saved'])} less collateral on "
-             "today's book. The cushion is in the wrong places, not too "
-             "small overall.")
-
-    if p["drill_shortfall"] > 0:
-        para3 = (f"If {p['drill_name']} defaulted today with "
-                 f"{money(p['drill_loan'])} on loan, closing out over the worst "
-                 f"two days in the last three years (the window opening "
-                 f"{p['drill_window']}) would leave a shortfall of "
-                 f"{money(p['drill_shortfall'])} after netting, which the "
-                 f"indemnity would pay. {p['drill_nonstd_pct']}% of its "
-                 "collateral is non-standard.")
-    else:
-        para3 = (f"If {p['drill_name']} defaulted today with "
-                 f"{money(p['drill_loan'])} on loan, the close out would leave "
-                 "no shortfall after netting on this path.")
-    return f"{para1}\n\n{para2}\n\n{para3}"
+    para2 = (f"These figures come from a load that passed "
+             f"{p['checks_passed']} of {p['checks_total']} data controls. "
+             f"{p['n_concerns']} data concerns are open against the feed, "
+             f"{p['n_high']} of them high severity because the break would "
+             "have understated risk: ")
+    para2 += ", and ".join(p["high_impacts"]) + ". "
+    para2 += (f"Each has a compensating action in place today and a "
+              f"permanent fix agreed, due within {p['sla_days']} business "
+              "days.")
+    return f"{para1}\n\n{para2}"
 
 
 def _facts_block(p):
@@ -154,17 +139,15 @@ def _facts_block(p):
         lines.append("borrowers over their non-standard collateral cap: "
                      f"{_names(p['nonstd_breaches'])}")
     lines += [
-        f"backtest, flat house haircut exceedances: {p['flat_exceed']}",
-        f"backtest, volatility scaled haircut exceedances: {p['scaled_exceed']}",
-        f"backtest, exceedances expected at 99% confidence: {p['expected_exceed']}",
-        f"collateral the scaled method needs less of, on today's book: "
-        f"{money(p['collateral_saved'])}",
-        f"fire drill borrower: {p['drill_name']}, {money(p['drill_loan'])} on loan",
-        f"fire drill shortfall after netting, worst two day window: "
-        f"{money(p['drill_shortfall'])}",
-        f"fire drill window opens: {p['drill_window']}",
-        f"fire drill borrower non-standard collateral share: {p['drill_nonstd_pct']}%",
+        f"data controls passed on this load: {p['checks_passed']} of "
+        f"{p['checks_total']}",
+        f"open data concerns: {p['n_concerns']}",
+        f"high severity data concerns (risk would have been understated): "
+        f"{p['n_high']}",
     ]
+    for t in p["high_impacts"]:
+        lines.append(f"high severity concern impact: {t}")
+    lines.append(f"remediation due within: {p['sla_days']} business days")
     return "\n".join(lines)
 
 
@@ -182,8 +165,7 @@ def _allowed_numbers(p):
     # anything we wrote in the facts block is fair game, plus billion
     # and million restatements of every money figure
     allowed = _numbers_in(_facts_block(p))
-    for k in ("on_loan", "collateral", "margin_call_total", "largest_call",
-              "collateral_saved", "drill_loan", "drill_shortfall"):
+    for k in ("on_loan", "collateral", "margin_call_total", "largest_call"):
         v = float(p[k])
         allowed |= {v, round(v), round(v / 1000, 1), round(v / 1000, 2)}
     allowed |= {1.0, 2.0, 3.0, 99.0, 100.0}
